@@ -168,8 +168,6 @@ class SpringerScrapper:
         
         d_dwl = self.download_dir+'\\'+subject if subject else self.download_dir
         
-        return 
-        # TODO: Remove Return
         profile = webdriver.FirefoxProfile()
         profile.set_preference("browser.download.folderList", 2)
         profile.set_preference("browser.download.dir", d_dwl)
@@ -177,17 +175,20 @@ class SpringerScrapper:
         profile.set_preference("browser.helperApps.neverAsk.saveToDisk", "application/pdf")
         profile.set_preference("pdfjs.disabled", True) # disable the built-in PDF viewer
         
-        # self.profile = profile
-        # self.driver = webdriver.Firefox(executable_path= self.path_gecko,
-        #                                 firefox_profile=profile)
+        self.profile = profile
+        self.driver = webdriver.Firefox(executable_path= self.path_gecko,
+                                        firefox_profile=profile)
     
     def __folderSaving(self, subject):
         
         if subject not in SubjectsEnum.members():
             raise Exception("subject [{}] is not valid".format(subject))
         
-        if not subject in os.listdir(os.path.join(self.download_dir)):
-            os.mkdir(self.download_dir+'\\'+subject)
+        if not os.path.exists(self.download_dir):
+            os.mkdir(r'{}'.format(self.download_dir))
+            
+        if not os.path.exists(self.download_dir+'\\'+subject):
+            os.mkdir(r'{}\\{}'.format(self.download_dir, subject))
             
         self.profile.set_preference("browser.download.dir", 
                                     self.download_dir+'\\'+subject)
@@ -462,4 +463,4 @@ if __name__ == '__main__':
     
     
     downloadAll()
-    renameAll()
+    #renameAll()
