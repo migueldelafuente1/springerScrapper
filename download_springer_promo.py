@@ -11,6 +11,8 @@ Created on Wed Apr 15 18:05:45 2020
 import json
 from selenium.common.exceptions import WebDriverException
 import inspect
+from copy import deepcopy
+from dask.rewrite import _match
 
 with open('free_springer_dois', 'r', encoding='utf8', errors='ignore') as f:
     data = f.read()
@@ -32,7 +34,6 @@ for i, string_ in enumerate(info):
         books_by_subject[subject] = [(title, "http://"+doi)]
     else:
         books_by_subject[subject].append((title, "http://"+doi))
-
 
 with open('dois.json', 'w+') as jf:
     json.dump(books, jf)
@@ -176,18 +177,14 @@ class SpringerScrapper:
         profile.set_preference("browser.helperApps.neverAsk.saveToDisk", "application/pdf")
         profile.set_preference("pdfjs.disabled", True) # disable the built-in PDF viewer
         
-#         self.profile = profile
-#         self.driver = webdriver.Firefox(executable_path= self.path_gecko,
-#                                         firefox_profile=profile)
+        # self.profile = profile
+        # self.driver = webdriver.Firefox(executable_path= self.path_gecko,
+        #                                 firefox_profile=profile)
     
     def __folderSaving(self, subject):
         
         if subject not in SubjectsEnum.members():
             raise Exception("subject [{}] is not valid".format(subject))
-#         dirs = []
-#         for dI in os.listdir(self.download_dir):
-#             if os.path.isdir(os.path.join(self.download_dir, dI)):
-#                 dirs.append(dI)
         
         if not subject in os.listdir(os.path.join(self.download_dir)):
             os.mkdir(self.download_dir+'\\'+subject)
@@ -315,55 +312,75 @@ class SpringerScrapper:
         f_path = self.download_dir + '\\' + self.subject
         book_list = os.listdir(f_path)
         
+        self._booksBySubject = deepcopy(books_by_subject[self.subject])
+        
         transformed = {}
-            
+        not_transformed = list(map(lambda x: x[0], self._booksBySubject))
+        self.__wait()
         for file_ in book_list:
             if file_[:2] not in ('19','20'):
                 print("Book '{}' already formatted".format(file_))
                 continue
-                
+            
             year, _, title = file_.split('_')
             title = title.replace('.pdf','')
             
             gotit = False
-            for index, tupl_ in enumerate(books_by_subject[self.subject]):
-                book, _ = tupl_
-                #_keyWords = book.translate(',-:').split()
-                _keyWords = _mergeStopWords(book)
-                
-                _match = list(map(lambda key: key in title, _keyWords))
-                
-                _lenTrue = len(list(filter(lambda i: i, _match)))
-                _lenMin =  round(len(_keyWords)/2 + 0.1)
-                if (_lenTrue >= _lenMin):
+            for index, tupl_ in enumerate(self._booksBySubject):
+                _bool_is_the_book, book = self.__filterBookName(title, tupl_)
+                if _bool_is_the_book:
                     #replace(' ', '_')
                     new_name = book + " ({}).pdf".format(year)
                     new_name = _filterIllegal(new_name)
-                    os.rename(f_path+'\\'+file_, f_path+'\\'+new_name)
-                    
+                    #os.rename(f_path+'\\'+file_, f_path+'\\'+new_name)
                     gotit = True
                     transformed[book] = new_name
+                    
+                    #if book in not_transformed:
+                    not_transformed.remove(book)
                     break
             if gotit:
-                del books_by_subject[self.subject][index]
+                del self._booksBySubject[index]
         
-        self.__checkRenaming(transformed)
+        self.__checkRenaming(transformed, not_transformed, f_path)
     
-    def __checkRenaming(self, transformed):
+    def __filterBookName(self, title, tuple_book):
+        book, _ = tuple_book
+        #_keyWords = book.translate(',-:').split()
+        _keyWords = _mergeStopWords(book)
+        
+        _match = list(map(lambda key: key in title, _keyWords))
+        if _match[-1] == False:
+            _match.pop() # Last word is split, 
+        _lenTrue = len(list(filter(lambda i: i, _match)))
+        _lenMin =  max(2, round(len(_keyWords)/2 + 0.1))
+        return (_lenTrue >= _lenMin, book)
+    
+    renaming_log_path = 'log_rename.txt'
+    
+    def __checkRenaming(self, transformed, not_transformed, f_path):
         """ 
         :transformed <dict> (previous_value, new_value)"""
+        book_list = list(filter(lambda f: f.startswith('20'), os.listdir(f_path)))
         
+        with open(f_path+'\\'+self.renaming_log_path, 'a+') as f:
+            f.write(" = Unchanged filenames    =====")
+            f.write(book_list)
+            f.write(" = not transformed titles =====")
+            f.write(not_transformed)
+            
         correct = False
         print("Check if all the titles for {} are correct:".format(self.subject))
         while(not correct):
-            correct = print("Are all correct?, type 0 for False, nothing or 1 for True")
+            correct = '1'
+            print("Are all correct?, type 0 for False, nothing or 1 for True")
             correct = bool(int(correct)) if correct else True
             if correct:
                 break
             
             while (not correct):
                 check = dict([(it[0], it[1]) for it in enumerate(transformed.items())])
-                print('  indx\t Original Title  ->  New Value ')
+                print('  ind\t Original Title  ->  New Value ')
                 for i, item_ in check.items():
                     print('  ',i,'.\t', item_[0],'  ->  ', item_[1])
                 
@@ -373,23 +390,27 @@ class SpringerScrapper:
                 transformed[check[i_change][0]] = val_change
                 correct = bool(input(" Are more errors? (type 1 if not, otherwise pass)"))
 
-
-            
+#===============================================================================
+#%%     HELPERS
+#===============================================================================
+_ILLEGAL = ['NUL','\',''//',':','*','"','<','>','|']
 def _filterIllegal(title):
-    illegal = ['NUL','\',''//',':','*','"','<','>','|']
-    for i in illegal:
+    for i in _ILLEGAL:
         title = title.replace(i, '_')
     return title
 
+_TRANSLATE = [s for s in ',.-:;?¿!¿~@|¬\\']
 def _mergeStopWords(title):
-    title = title.translate(',-:').split()
+    for s in _TRANSLATE:
+        title = title.replace(s, ' ')
+    title = title.split()
     w_main = []
     for w in title:
         if w.lower() in STOP_WORDS:
             continue
         w_main.append(w)
     return w_main
-        
+
 def downloadAll():
     """ Problems with the individual subject folder modification, 
     this loop iterates over all subjects
@@ -405,13 +426,34 @@ def downloadAll():
                 continue
         print("Downloading all of subject '{}'".format(subject))
         spr_driver = SpringerScrapper(subject)
-        #spr_driver.downloadBySubject(subject)
+        spr_driver.downloadBySubject(subject)
+        
+        ## Rename to the complete title while in the folder.
+        #spr_driver.renameFiles()
+        
+    print("\n\nAll books downloaded, you filthy pirate\n   Bye ...")
+
+
+def renameAll():
+    """ Problems with the individual subject folder modification, 
+    this loop iterates over all subjects
+    """
+    _subjects = SubjectsEnum.members()
+    for subject in SubjectsEnum.members(): 
+        print("\n-------------------------------------------------------------")
+        if not os.path.exists(SpringerScrapper.download_dir+'\\'+subject):
+            print("Subject '{}' has not been downloaded".format(subject))
+            continue
+        print("Renaming subject '{}'".format(subject))
+        spr_driver = SpringerScrapper(subject)
         
         ## Rename to the complete title while in the folder.
         spr_driver.renameFiles()
         
     print("\n\nAll books downloaded, you filthy pirate\n   Bye ...")
-        
+#===============================================================================
+#%%     MAIN
+#===============================================================================
 if __name__ == '__main__':
     
 #     subject = SubjectsEnum.Engineering
@@ -420,4 +462,4 @@ if __name__ == '__main__':
     
     
     downloadAll()
-    
+    renameAll()
