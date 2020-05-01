@@ -110,6 +110,7 @@ class SpringerScrapper:
     MAX_ITER     = 40
     WAIT_TIME    = 6 # seconds
     Download_Fail = {}
+    GREATE_WEB_DRIVER = True # renaming already downloaded files does not require 
     
     def __init__(self, subject=''):
         self.book   = ''
@@ -167,6 +168,9 @@ class SpringerScrapper:
         options.binary_location = self.path_gecko
         
         d_dwl = self.download_dir+'\\'+subject if subject else self.download_dir
+        
+        if not self.GREATE_WEB_DRIVER:
+            return
         
         profile = webdriver.FirefoxProfile()
         profile.set_preference("browser.download.folderList", 2)
@@ -327,15 +331,18 @@ class SpringerScrapper:
             title = title.replace('.pdf','')
             
             gotit = False
-            for index, tupl_ in enumerate(self._booksBySubject):
+            for index, tupl_ in enumerate(self._booksBySubject.copy()):
                 _bool_is_the_book, book = self.__filterBookName(title, tupl_)
                 if _bool_is_the_book:
                     #replace(' ', '_')
                     new_name = book + " ({}).pdf".format(year)
                     new_name = _filterIllegal(new_name)
-                    #os.rename(f_path+'\\'+file_, f_path+'\\'+new_name)
+                    try:
+                        os.rename(f_path+'\\'+file_, f_path+'\\'+new_name)
+                    except BaseException as b:
+                        print("ERROR:\n", b) # skip 
                     gotit = True
-                    transformed[book] = new_name
+                    transformed[book] = (file_, new_name)
                     
                     #if book in not_transformed:
                     not_transformed.remove(book)
@@ -357,19 +364,16 @@ class SpringerScrapper:
         _lenMin =  max(2, round(len(_keyWords)/2 + 0.1))
         return (_lenTrue >= _lenMin, book)
     
-    renaming_log_path = 'log_rename.txt'
+    renaming_log_filename = 'log_rename.txt'
     
     def __checkRenaming(self, transformed, not_transformed, f_path):
         """ 
         :transformed <dict> (previous_value, new_value)"""
         book_list = list(filter(lambda f: f.startswith('20'), os.listdir(f_path)))
         
-        with open(f_path+'\\'+self.renaming_log_path, 'a+') as f:
-            f.write(" = Unchanged filenames    =====")
-            f.write(book_list)
-            f.write(" = not transformed titles =====")
-            f.write(not_transformed)
-            
+        if not self.__logRenamedFiles(f_path, transformed, not_transformed):
+            return
+        
         correct = False
         print("Check if all the titles for {} are correct:".format(self.subject))
         while(not correct):
@@ -390,7 +394,29 @@ class SpringerScrapper:
                 
                 transformed[check[i_change][0]] = val_change
                 correct = bool(input(" Are more errors? (type 1 if not, otherwise pass)"))
-
+    
+    def __logRenamedFiles(self, f_path, transformed, not_transformed):
+        
+        try:
+            with open(f_path+'\\'+self.renaming_log_filename, 'w+') as f:
+                pass
+            with open(f_path+'\\'+self.renaming_log_filename, 'a+') as f:
+                f.write("\n = Changed filenames    =====\n")
+                f.write('\n'.join(map(lambda x: "{} -> {}".format(*x), transformed.values())))
+                f.write("\n = not transformed titles =====\n")
+                f.write('\n'.join(not_transformed))
+                
+                print("\n = Changed filenames    =====")
+                print('\n'.join(map(lambda x: "{} -> {}".format(*x), transformed.values())))
+                print(" = not transformed titles =====")
+                print('\n'.join(not_transformed))
+        except BaseException as b:
+            print("ERROR:\n",
+                  "[{}] Non Unicode char, breaks rename file\n".format(self.subject),
+                  b)
+            print("\n".join(not_transformed))
+            return False
+        return True
 #===============================================================================
 #%%     HELPERS
 #===============================================================================
@@ -446,12 +472,13 @@ def renameAll():
             print("Subject '{}' has not been downloaded".format(subject))
             continue
         print("Renaming subject '{}'".format(subject))
+        SpringerScrapper.GREATE_WEB_DRIVER = False
         spr_driver = SpringerScrapper(subject)
         
         ## Rename to the complete title while in the folder.
         spr_driver.renameFiles()
         
-    print("\n\nAll books downloaded, you filthy pirate\n   Bye ...")
+    print("\n\nRenamed, check non renamed files in console output\n   Bye ...")
 #===============================================================================
 #%%     MAIN
 #===============================================================================
@@ -462,5 +489,5 @@ if __name__ == '__main__':
 #     spr_driver.downloadBySubject(subject)
     
     
-    downloadAll()
-    #renameAll()
+    #downloadAll()
+    renameAll()
